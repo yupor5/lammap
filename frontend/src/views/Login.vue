@@ -71,6 +71,11 @@
             />
           </el-form-item>
 
+          <div v-if="!isRegister" class="flex items-center justify-between mb-4">
+            <el-checkbox v-model="rememberMe">记住我</el-checkbox>
+            <el-button type="primary" link @click="showForgotPassword = true">忘记密码？</el-button>
+          </div>
+
           <el-form-item>
             <el-button type="primary" class="w-full" :loading="loading" @click="handleSubmit">
               {{ isRegister ? '注册' : '登录' }}
@@ -86,6 +91,22 @@
             {{ isRegister ? '去登录' : '立即注册' }}
           </el-button>
         </div>
+
+        <!-- 忘记密码弹窗 -->
+        <el-dialog v-model="showForgotPassword" title="忘记密码" width="400px" :append-to-body="true">
+          <el-form :model="forgotForm" label-width="60px">
+            <el-form-item label="邮箱">
+              <el-input v-model="forgotForm.email" placeholder="请输入注册邮箱" />
+            </el-form-item>
+            <el-form-item label="新密码">
+              <el-input v-model="forgotForm.newPassword" type="password" placeholder="请输入新密码（至少6位）" show-password />
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button @click="showForgotPassword = false">取消</el-button>
+            <el-button type="primary" :loading="forgotLoading" @click="handleResetPassword">重置密码</el-button>
+          </template>
+        </el-dialog>
       </div>
     </div>
   </div>
@@ -97,6 +118,7 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
+import request from '@/utils/request'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -104,12 +126,20 @@ const userStore = useUserStore()
 const formRef = ref<FormInstance>()
 const isRegister = ref(false)
 const loading = ref(false)
+const rememberMe = ref(localStorage.getItem('rememberMe') === 'true')
+const showForgotPassword = ref(false)
+const forgotLoading = ref(false)
 
 const form = reactive({
   name: '',
   company: '',
-  email: '',
+  email: localStorage.getItem('rememberedEmail') || '',
   password: '',
+})
+
+const forgotForm = reactive({
+  email: '',
+  newPassword: '',
 })
 
 const rules: FormRules = {
@@ -136,6 +166,13 @@ async function handleSubmit() {
         ElMessage.success('注册成功')
       } else {
         await userStore.login(form.email, form.password)
+        if (rememberMe.value) {
+          localStorage.setItem('rememberMe', 'true')
+          localStorage.setItem('rememberedEmail', form.email)
+        } else {
+          localStorage.removeItem('rememberMe')
+          localStorage.removeItem('rememberedEmail')
+        }
         ElMessage.success('登录成功')
       }
       router.push('/dashboard')
@@ -145,5 +182,30 @@ async function handleSubmit() {
       loading.value = false
     }
   })
+}
+
+async function handleResetPassword() {
+  if (!forgotForm.email || !forgotForm.newPassword) {
+    ElMessage.warning('请填写邮箱和新密码')
+    return
+  }
+  if (forgotForm.newPassword.length < 6) {
+    ElMessage.warning('密码至少6位')
+    return
+  }
+  forgotLoading.value = true
+  try {
+    await request.post('/auth/reset-password', {
+      email: forgotForm.email,
+      newPassword: forgotForm.newPassword,
+    })
+    ElMessage.success('密码重置成功，请使用新密码登录')
+    showForgotPassword.value = false
+    form.email = forgotForm.email
+  } catch {
+    ElMessage.error('重置失败，请确认邮箱是否正确')
+  } finally {
+    forgotLoading.value = false
+  }
 }
 </script>

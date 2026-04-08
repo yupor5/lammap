@@ -47,6 +47,8 @@ import { ref, watch } from 'vue'
 import type { Quote, QuoteItem } from '@/stores/quote'
 import { ElMessage } from 'element-plus'
 import { DocumentCopy, Download } from '@element-plus/icons-vue'
+import { exportQuotePdf } from '@/utils/exportPdf'
+import { exportQuoteExcel } from '@/utils/exportExcel'
 
 const props = defineProps<{ quote: Quote }>()
 const emit = defineEmits<{ 'update:items': [items: QuoteItem[]] }>()
@@ -87,10 +89,24 @@ function handleCopyText() {
 }
 
 function handleExportPDF() {
-  ElMessage.info('PDF 导出功能开发中')
+  const data = {
+    customerName: props.quote.customerName,
+    currency: props.quote.currency,
+    items: localItems.value,
+    totalAmount: localItems.value.reduce((s, item) => s + (item.totalPrice || 0), 0),
+  }
+  exportQuotePdf(data)
+  ElMessage.success('PDF 已导出')
 }
 
 function handleExportExcel() {
-  ElMessage.info('Excel 导出功能开发中')
+  const data = {
+    customerName: props.quote.customerName,
+    currency: props.quote.currency,
+    items: localItems.value,
+    totalAmount: localItems.value.reduce((s, item) => s + (item.totalPrice || 0), 0),
+  }
+  exportQuoteExcel(data)
+  ElMessage.success('Excel 已导出')
 }
 </script>

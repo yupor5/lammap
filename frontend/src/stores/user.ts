@@ -1,33 +1,50 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import request from '@/utils/request'
 
 export interface UserInfo {
+  id: number
+  email: string
   name: string
-  email?: string
-  company?: string
+  company: string
 }
 
 export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserInfo | null>(null)
+  const token = ref(localStorage.getItem('token') || '')
 
-  async function login(email: string, _password: string) {
-    userInfo.value = { name: email.split('@')[0] || '用户', email }
-    localStorage.setItem('token', 'dev-token')
+  async function login(email: string, password: string) {
+    const res: any = await request.post('/auth/login', { email, password })
+    token.value = res.data.token
+    localStorage.setItem('token', res.data.token)
+    userInfo.value = res.data.user
+    return res
   }
 
-  async function register(payload: { name: string; company: string; email: string; password: string }) {
-    userInfo.value = {
-      name: payload.name,
-      email: payload.email,
-      company: payload.company,
+  async function register(data: { email: string; password: string; name: string; company: string }) {
+    const res: any = await request.post('/auth/register', data)
+    token.value = res.data.token
+    localStorage.setItem('token', res.data.token)
+    userInfo.value = res.data.user
+    return res
+  }
+
+  async function fetchProfile() {
+    try {
+      const res: any = await request.get('/auth/profile')
+      userInfo.value = res.data
+      return res
+    } catch {
+      logout()
+      throw new Error('获取用户信息失败')
     }
-    localStorage.setItem('token', 'dev-token')
   }
 
   function logout() {
+    token.value = ''
     userInfo.value = null
     localStorage.removeItem('token')
   }
 
-  return { userInfo, login, register, logout }
+  return { userInfo, token, login, register, fetchProfile, logout }
 })

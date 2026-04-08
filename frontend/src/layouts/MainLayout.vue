@@ -74,7 +74,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { Expand, Fold, DocumentAdd, DataBoard, Document, Goods, Files, Setting } from '@element-plus/icons-vue'
@@ -84,6 +84,16 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const isCollapse = ref(false)
+
+onMounted(async () => {
+  if (userStore.token && !userStore.userInfo) {
+    try {
+      await userStore.fetchProfile()
+    } catch {
+      // fetchProfile handles logout on failure
+    }
+  }
+})
 
 const activeMenu = computed(() => route.path)
 
@@ -96,7 +106,13 @@ const routeNameMap: Record<string, string> = {
   '/settings': '设置',
 }
 
-const currentRoute = computed(() => routeNameMap[route.path] || '')
+const currentRoute = computed(() => {
+  const p = route.path
+  if (routeNameMap[p]) return routeNameMap[p]
+  const m = p.match(/^\/quotes\/(\d+)$/)
+  if (m) return `报价详情 #${m[1]}`
+  return ''
+})
 
 const userName = computed(() => userStore.userInfo?.name || '用户')
 const userInitial = computed(() => (userStore.userInfo?.name || 'U').charAt(0).toUpperCase())

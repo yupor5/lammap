@@ -1,8 +1,11 @@
 <template>
-  <div class="space-y-6">
-    <div class="flex items-center gap-3">
-      <el-button text :icon="ArrowLeft" @click="$router.back()">返回</el-button>
-      <h1 class="text-2xl font-bold text-gray-800">产品详情</h1>
+  <div class="space-y-6" v-loading="loading">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <el-button text :icon="ArrowLeft" @click="$router.back()">返回</el-button>
+        <h1 class="text-2xl font-bold text-gray-800">{{ isNew ? '新建产品' : '产品详情' }}</h1>
+      </div>
+      <el-button type="primary" size="large" :loading="saving" @click="handleSave">保存修改</el-button>
     </div>
 
     <div class="grid grid-cols-2 gap-6">
@@ -50,20 +53,67 @@
         </el-upload>
       </div>
     </div>
-
-    <div class="flex justify-end">
-      <el-button type="primary" size="large">保存修改</el-button>
-    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useProductStore } from '@/stores/product'
+import { ElMessage } from 'element-plus'
 import { ArrowLeft, UploadFilled } from '@element-plus/icons-vue'
 
+const route = useRoute()
+const router = useRouter()
+const productStore = useProductStore()
+
+const loading = ref(false)
+const saving = ref(false)
+const isNew = computed(() => route.params.id === 'new')
+
 const product = reactive({
-  name: '不锈钢桌腿', sku: 'STL-70B', category: '五金', description: '高品质304不锈钢桌腿，适用于各类办公桌和餐桌',
-  size: '70cm', material: 'SS304', color: '黑色', process: '粉末喷涂', packaging: '单独纸箱包装',
-  price: 12.50, moq: 100, leadTime: '25-30天', paymentTerms: 'T/T 30% deposit',
+  name: '', sku: '', category: '', description: '',
+  size: '', material: '', color: '', process: '', packaging: '',
+  price: 0, moq: 100, leadTime: '', paymentTerms: '',
+})
+
+async function loadProduct() {
+  if (isNew.value) return
+  loading.value = true
+  try {
+    const data = await productStore.fetchProduct(Number(route.params.id))
+    Object.assign(product, data)
+  } catch {
+    ElMessage.error('加载产品失败')
+    router.back()
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleSave() {
+  if (!product.name.trim()) {
+    ElMessage.warning('请输入产品名称')
+    return
+  }
+  saving.value = true
+  try {
+    if (isNew.value) {
+      const created = await productStore.createProduct({ ...product })
+      ElMessage.success('产品已创建')
+      router.replace(`/products/${created.id}`)
+    } else {
+      await productStore.updateProduct(Number(route.params.id), { ...product })
+      ElMessage.success('产品已更新')
+    }
+  } catch {
+    // error handled in interceptor
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(() => {
+  loadProduct()
 })
 </script>

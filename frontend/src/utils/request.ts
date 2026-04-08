@@ -4,7 +4,8 @@ import router from '@/router'
 
 const request = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  // AI 生成可能超过 30s，这里适当放宽；如需更细粒度可在单次请求上覆盖 timeout
+  timeout: 120000,
 })
 
 request.interceptors.request.use(

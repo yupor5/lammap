@@ -14,7 +14,7 @@
       <el-checkbox v-model="att.selected" />
       <el-icon :size="20" class="text-gray-400"><Document /></el-icon>
       <span class="flex-1 text-sm text-gray-700">{{ att.name }}</span>
-      <el-button text size="small">预览</el-button>
+      <el-button text size="small" @click="handlePreview(att)">预览</el-button>
     </div>
 
     <el-button class="w-full" @click="handleGenerateEmailPack">生成邮件附件包</el-button>
@@ -25,8 +25,8 @@
 import { ElMessage } from 'element-plus'
 import { Download, Document } from '@element-plus/icons-vue'
 
-defineProps<{
-  attachments: { name: string; selected: boolean }[]
+const props = defineProps<{
+  attachments: { name: string; url?: string; selected: boolean }[]
 }>()
 
 function handleDownloadAll() {
@@ -35,5 +35,15 @@ function handleDownloadAll() {
 
 function handleGenerateEmailPack() {
   ElMessage.info('邮件附件包功能开发中')
+}
+
+function handlePreview(att: { name: string; url?: string }) {
+  const url = String(att.url || '').trim()
+  if (!url) {
+    ElMessage.warning('暂无可预览链接（请先上传附件或在生成结果中提供 url）')
+    return
+  }
+  // 直接新窗口打开：pdf/图片会预览，其它类型由浏览器处理下载/打开
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 </script>

@@ -25,9 +25,12 @@ func main() {
 	{
 		auth := api.Group("/auth")
 		{
-			auth.POST("/register", handlers.Register(db))
+			auth.POST("/register", handlers.Register(db, cfg.JWTSecret))
 			auth.POST("/login", handlers.Login(db, cfg.JWTSecret))
 			auth.GET("/profile", middleware.Auth(cfg.JWTSecret), handlers.Profile(db))
+			auth.PUT("/password", middleware.Auth(cfg.JWTSecret), handlers.ChangePassword(db))
+			auth.POST("/forgot-password", handlers.ForgotPassword(db))
+			auth.POST("/reset-password", handlers.ResetPassword(db))
 		}
 
 		protected := api.Group("")
@@ -47,6 +50,8 @@ func main() {
 			{
 				quotes.POST("/parse", handlers.ParseRequirement(cfg))
 				quotes.POST("/generate", handlers.GenerateQuote(cfg))
+				quotes.POST("/generate-jobs", handlers.CreateGenerateJob(db, cfg))
+				quotes.GET("/generate-jobs/:id", handlers.GetGenerateJob(db))
 				quotes.POST("", handlers.CreateQuote(db))
 				quotes.GET("", handlers.ListQuotes(db))
 				quotes.GET("/:id", handlers.GetQuote(db))
@@ -63,6 +68,7 @@ func main() {
 				templates.PUT("/:id", handlers.UpdateTemplate(db))
 				templates.DELETE("/:id", handlers.DeleteTemplate(db))
 			}
+			protected.POST("/ai/generate-template", handlers.GenerateTemplateByCategory(db, cfg))
 
 			dashboard := protected.Group("/dashboard")
 			{
@@ -70,7 +76,18 @@ func main() {
 				dashboard.GET("/recent", handlers.RecentQuotes(db))
 			}
 
-			api.POST("/upload", middleware.Auth(cfg.JWTSecret), handlers.Upload())
+			attachments := protected.Group("/attachments")
+			{
+				attachments.GET("", handlers.ListAttachments(db))
+				attachments.POST("", handlers.UploadAttachment(db))
+				attachments.DELETE("/:id", handlers.DeleteAttachment(db))
+			}
+
+			protected.POST("/products/match", handlers.MatchProducts(db))
+			protected.POST("/ai/compose-inquiry", handlers.ComposeInquiry(cfg))
+			protected.POST("/ai/generate-inquiry-examples", handlers.GenerateInquiryExamples(cfg))
+
+			protected.POST("/upload", handlers.Upload())
 		}
 	}
 

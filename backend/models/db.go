@@ -3,7 +3,7 @@ package models
 import (
 	"log"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -21,7 +21,9 @@ func AutoMigrate(db *gorm.DB) {
 		&Product{},
 		&Quote{},
 		&QuoteItem{},
+		&GenerateJob{},
 		&Template{},
+		&Attachment{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to migrate: %v", err)

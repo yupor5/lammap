@@ -14,5 +14,6 @@ type Template struct {
 	UserID    uint           `json:"userId"`
 	Name      string         `gorm:"size:255" json:"name"`
 	Category  string         `gorm:"size:50" json:"category"`
+	Language  string         `gorm:"size:10;index" json:"language"`
 	Content   string         `gorm:"type:text" json:"content"`
 }
