@@ -22,6 +22,9 @@ func AutoMigrate(db *gorm.DB) {
 		&Quote{},
 		&QuoteItem{},
 		&GenerateJob{},
+		&AttachmentPackJob{},
+		&AttachmentGenerateJob{},
+		&AttachmentZipJob{},
 		&Template{},
 		&Attachment{},
 	)

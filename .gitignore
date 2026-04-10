@@ -1,0 +1,10 @@
+# Backend local secrets / runtime artifacts
+/backend/config.yaml
+/backend/*.db
+/backend/*.exe
+/backend/uploads/
+
+# Common
+*.log
+.DS_Store
+

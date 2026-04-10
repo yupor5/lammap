@@ -40,7 +40,7 @@ export interface Quote {
   items: QuoteItem[]
   replyVersions: { title: string; content: string; language: string }[]
   confirmationList: { question: string; questionEn: string; checked: boolean }[]
-  attachments: { name: string; url?: string; selected: boolean }[]
+  attachments: { name: string; url?: string; selected: boolean; source?: 'upload' | 'ai' | 'ai_generated' }[]
   templateMeta?: any
   renderedContents?: any
   totalAmount: number

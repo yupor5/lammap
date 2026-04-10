@@ -284,7 +284,10 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
         <div class="p-4 border-b border-gray-100 flex items-center justify-between">
           <h3 class="font-semibold text-gray-800">已识别需求参数</h3>
           <div class="flex items-center gap-2">
-            <el-tag v-if="unconfirmedCount > 0" type="warning" size="small">{{ unconfirmedCount }} 项未确认</el-tag>
+            <el-tag v-if="autoUnconfirmedCount > 0" type="warning" size="small">{{ autoUnconfirmedCount }} 项待补齐</el-tag>
+            <el-tag v-else-if="manualOnlyUnconfirmedCount > 0" type="info" size="small">
+              {{ manualOnlyUnconfirmedCount }} 项细节待手动确认
+            </el-tag>
             <el-button v-if="parsedParams" size="small" @click="runAutoValidate">确认校验</el-button>
             <el-button
               v-if="parsedParams && manualOnlyUnconfirmedCount > 0"
@@ -491,7 +494,13 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
               </div>
             </el-tab-pane>
             <el-tab-pane label="附件包" name="attachments" class="flex-1 overflow-y-auto p-4">
-              <AttachmentPack :attachments="quoteResult.attachments" />
+              <AttachmentPack
+                :attachments="quoteResult.attachments"
+                :loading="attachmentPackLoading"
+                @generate-pack="handleGenerateEmailAttachmentPack"
+                @download-all="handleDownloadAttachmentPack"
+                @ai-generate="handleAiGenerateSingleAttachment"
+              />
             </el-tab-pane>
           </el-tabs>
         </div>
@@ -539,6 +548,7 @@ const requirementText = ref('')
 const matchedProducts = ref<any[]>([])
 const uploadFiles = ref<UploadUserFile[]>([])
 const uploadedRefs = ref<{ filename: string; path: string }[]>([])
+const uploadedAttachments = ref<{ name: string; url?: string; selected: boolean; source?: 'upload' }[]>([])
 const activeTab = ref('quotation')
 const parsedParams = ref<ParsedParams | null>(null)
 const quoteResult = ref<Quote | null>(null)
@@ -811,6 +821,17 @@ const unconfirmedCount = computed(() => derivedUnconfirmed.value.length)
 const manualOnlyUnconfirmed = computed(() => derivedUnconfirmed.value.filter((x) => !unconfirmedMap[x]))
 const manualOnlyUnconfirmedCount = computed(() => manualOnlyUnconfirmed.value.length)
 
+// 仅统计“能映射到字段且字段为空”的未确认项（也就是你真正需要补填的项）
+const autoUnconfirmed = computed(() => {
+  const p = parsedParams.value
+  if (!p) return []
+  return derivedUnconfirmed.value
+    .filter((label) => !!unconfirmedMap[label])
+    .map((label) => ({ label, key: unconfirmedMap[label] }))
+    .filter((x) => x.key && !isFilled((p as any)[x.key]))
+})
+const autoUnconfirmedCount = computed(() => autoUnconfirmed.value.length)
+
 watch(
   [requirementText, parsedParams, quoteResult, uploadFiles],
   () => {
@@ -989,6 +1010,17 @@ async function handleUpload(opt: UploadRequestOptions) {
   try {
     const res: any = await request.post('/upload', fd)
     uploadedRefs.value.push({ filename: res.data.filename, path: res.data.path })
+    const url = String(res.data.url || res.data.path || '').trim()
+    if (url) {
+      const att = { name: String(res.data.filename || ''), url, selected: true, source: 'upload' as const }
+      uploadedAttachments.value.push(att)
+      if (quoteResult.value) {
+        const exists = (quoteResult.value.attachments || []).some((x) => String(x.name).trim() === att.name)
+        if (!exists) {
+          quoteResult.value.attachments = [...(quoteResult.value.attachments || []), att]
+        }
+      }
+    }
     ElMessage.success(`已上传 ${res.data.filename}`)
     opt.onSuccess?.(res)
   } catch (e) {
@@ -1284,11 +1316,36 @@ function onItemsUpdate(items: Quote['items']) {
 }
 
 let generatePollTimer: any = null
+const attachmentPackLoading = ref(false)
+const aiGeneratingAttachmentNames = ref<Set<string>>(new Set())
 
 function stopGeneratePolling() {
   if (generatePollTimer) {
     clearTimeout(generatePollTimer)
     generatePollTimer = null
+  }
+}
+
+async function pollJobGeneric(url: string) {
+  const start = Date.now()
+  let interval = 1000
+  while (true) {
+    // eslint-disable-next-line no-await-in-loop
+    const res: any = await request.get(url)
+    const status = String(res.data?.status || '')
+    if (status === 'succeeded') return res.data
+    if (status === 'failed') throw new Error(String(res.data?.errorMsg || '任务失败'))
+
+    const elapsed = Date.now() - start
+    if (elapsed > 5 * 60 * 1000) throw new Error('任务超时（超过 5 分钟仍未完成）')
+    if (elapsed > 10000 && interval < 2000) interval = 2000
+    if (elapsed > 30000 && interval < 3000) interval = 3000
+    if (elapsed > 60000 && interval < 5000) interval = 5000
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((r) => {
+      stopGeneratePolling()
+      generatePollTimer = setTimeout(r, interval)
+    })
   }
 }
 
@@ -1320,6 +1377,83 @@ async function pollGenerateJob(jobId: number) {
       generatePollTimer = setTimeout(r, interval)
     })
   }
+}
+
+async function handleAiGenerateSingleAttachment(att: { name: string; url?: string; selected: boolean; source?: string }) {
+  if (!parsedParams.value || !quoteResult.value) {
+    ElMessage.warning('请先生成报价后再生成附件')
+    return
+  }
+  const name = String(att?.name || '').trim()
+  if (!name) return
+  if (!att.selected) {
+    ElMessage.warning('请先勾选该附件再生成')
+    return
+  }
+  if (String(att.url || '').trim()) return
+  if (String(att.source || '') !== 'ai') return
+  if (aiGeneratingAttachmentNames.value.has(name)) return
+
+  aiGeneratingAttachmentNames.value = new Set(aiGeneratingAttachmentNames.value).add(name)
+  try {
+    const created: any = await request.post('/quotes/attachment-generate-jobs', {
+      params: parsedParams.value,
+      quote: quoteResult.value,
+      attachment: { name, selected: true, url: '', source: 'ai' },
+    })
+    const jobId = Number(created.data?.jobId)
+    if (!jobId) throw new Error('创建附件生成任务失败')
+    const jobData: any = await pollJobGeneric(`/quotes/attachment-generate-jobs/${jobId}`)
+    const a = jobData?.attachment
+    const url = String(a?.url || '').trim()
+    if (url && quoteResult.value) {
+      quoteResult.value.attachments = (quoteResult.value.attachments || []).map((x: any) => {
+        if (String(x?.name || '').trim() !== name) return x
+        return { ...x, url, source: 'ai_generated' }
+      })
+    }
+    ElMessage.success('附件生成完成')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('附件生成失败，请稍后重试')
+  } finally {
+    const next = new Set(aiGeneratingAttachmentNames.value)
+    next.delete(name)
+    aiGeneratingAttachmentNames.value = next
+  }
+}
+
+async function handleGenerateEmailAttachmentPack() {
+  if (!parsedParams.value || !quoteResult.value) {
+    ElMessage.warning('请先生成报价后再生成附件包')
+    return
+  }
+  if (attachmentPackLoading.value) return
+  const selected = (quoteResult.value.attachments || []).filter((x: any) => x?.selected && String(x?.url || '').trim())
+  if (selected.length === 0) {
+    ElMessage.warning('请至少勾选 1 个“已存在文件”的附件（有 url 才能打包）')
+    return
+  }
+  attachmentPackLoading.value = true
+  try {
+    const created: any = await request.post('/quotes/attachment-zip-jobs', { attachments: selected })
+    const jobId = Number(created.data?.jobId)
+    if (!jobId) throw new Error('创建附件任务失败')
+    const jobData: any = await pollJobGeneric(`/quotes/attachment-zip-jobs/${jobId}`)
+    const zipUrl = String(jobData?.zipUrl || '').trim()
+    if (!zipUrl) throw new Error('未获取到 zipUrl')
+    window.open(zipUrl, '_blank', 'noopener,noreferrer')
+    ElMessage.success('附件包已生成，开始下载')
+  } catch (e) {
+    console.error(e)
+    ElMessage.error('生成附件包失败，请稍后重试')
+  } finally {
+    attachmentPackLoading.value = false
+  }
+}
+
+function handleDownloadAttachmentPack() {
+  handleGenerateEmailAttachmentPack()
 }
 
 async function handleGenerate() {
@@ -1364,6 +1498,19 @@ async function handleGenerate() {
       throw new Error('生成完成但未获取到结果数据')
     }
     quoteResult.value = mapGeneratePayload(rawResult, parsedParams.value)
+    // AI 给出的 attachments 默认标记为 ai；并合并用户上传的真实附件（可预览）
+    if (quoteResult.value) {
+      quoteResult.value.attachments = (quoteResult.value.attachments || []).map((a: any) => ({
+        ...a,
+        source: a?.source || 'ai',
+      }))
+      for (const up of uploadedAttachments.value) {
+        const exists = (quoteResult.value.attachments || []).some((x: any) => String(x.name).trim() === String(up.name).trim())
+        if (!exists) {
+          quoteResult.value.attachments.push(up as any)
+        }
+      }
+    }
     ElMessage.success('报价生成完成')
   } catch (e) {
     console.error(e)
