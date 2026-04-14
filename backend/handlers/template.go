@@ -55,10 +55,18 @@ func CreateTemplate(db *gorm.DB) gin.HandlerFunc {
 			Category string `json:"category"`
 			Language string `json:"language"`
 			Content  string `json:"content"`
+			Source   string `json:"source"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
 			Error(c, http.StatusBadRequest, "参数错误: "+err.Error())
 			return
+		}
+		src := strings.TrimSpace(input.Source)
+		if src == "" {
+			src = "user"
+		}
+		if src != "user" && src != "ai" && src != "system" {
+			src = "user"
 		}
 		tmpl := models.Template{
 			UserID:    userID,
@@ -66,6 +74,7 @@ func CreateTemplate(db *gorm.DB) gin.HandlerFunc {
 			Category:  strings.TrimSpace(input.Category),
 			Language:  strings.TrimSpace(input.Language),
 			Content:   input.Content,
+			Source:    src,
 		}
 		if tmpl.Language == "" {
 			tmpl.Language = "zh"
@@ -96,10 +105,17 @@ func UpdateTemplate(db *gorm.DB) gin.HandlerFunc {
 			Category string `json:"category"`
 			Language string `json:"language"`
 			Content  string `json:"content"`
+			Source   string `json:"source"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
 			Error(c, http.StatusBadRequest, "参数错误")
 			return
+		}
+		if strings.TrimSpace(input.Source) != "" {
+			s := strings.TrimSpace(input.Source)
+			if s == "user" || s == "ai" || s == "system" {
+				tmpl.Source = s
+			}
 		}
 		if strings.TrimSpace(input.Name) != "" {
 			tmpl.Name = input.Name

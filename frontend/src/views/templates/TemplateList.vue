@@ -26,6 +26,7 @@
             <el-select v-model="selectedTemplateId" placeholder="选择模板" class="w-60" @change="handleTemplateSelect">
               <el-option v-for="t in templateStore.templates" :key="t.id" :label="t.name" :value="t.id" />
             </el-select>
+            <el-tag v-if="currentTemplateSourceLabel" size="small" type="info">{{ currentTemplateSourceLabel }}</el-tag>
             <el-input v-model="templateName" placeholder="模板名称" class="w-48" size="default" />
           </div>
           <div class="flex gap-2">
@@ -93,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useTemplateStore } from '@/stores/template'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Document, Message, ChatDotRound, List } from '@element-plus/icons-vue'
@@ -103,6 +104,16 @@ const templateStore = useTemplateStore()
 
 const activeCategory = ref('quotation')
 const selectedTemplateId = ref<number | null>(null)
+
+const currentTemplateSourceLabel = computed(() => {
+  const id = selectedTemplateId.value
+  if (!id) return ''
+  const t = templateStore.templates.find((x) => x.id === id)
+  const s = (t?.source || 'user').toLowerCase()
+  if (s === 'ai') return 'AI'
+  if (s === 'system') return '系统'
+  return '手工'
+})
 const templateName = ref('')
 const templateContent = ref('')
 const saving = ref(false)

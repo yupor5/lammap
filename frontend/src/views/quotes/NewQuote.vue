@@ -13,9 +13,9 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-12 gap-4" style="height: calc(100vh - 180px);">
+    <div class="grid grid-cols-12 gap-4 min-h-0" style="height: calc(100vh - 180px);">
       <!-- 左栏：客户需求输入 -->
-      <div class="col-span-3 bg-white rounded-lg border border-gray-100 shadow-sm flex flex-col overflow-hidden">
+      <div class="col-span-3 min-h-0 bg-white rounded-lg border border-gray-100 shadow-sm flex flex-col overflow-hidden">
         <div class="p-4 border-b border-gray-100">
           <h3 class="font-semibold text-gray-800">客户需求输入</h3>
         </div>
@@ -280,7 +280,7 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
       </el-dialog>
 
       <!-- 中栏：AI 参数提取 -->
-      <div class="col-span-4 bg-white rounded-lg border border-gray-100 shadow-sm flex flex-col overflow-hidden">
+      <div class="col-span-4 min-h-0 bg-white rounded-lg border border-gray-100 shadow-sm flex flex-col overflow-hidden">
         <div class="p-4 border-b border-gray-100 flex items-center justify-between">
           <h3 class="font-semibold text-gray-800">已识别需求参数</h3>
           <div class="flex items-center gap-2">
@@ -405,13 +405,13 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
       </el-dialog>
 
       <!-- 右栏：生成结果 -->
-      <div class="col-span-5 bg-white rounded-lg border border-gray-100 shadow-sm flex flex-col overflow-hidden">
-        <div class="p-4 border-b border-gray-100">
+      <div class="col-span-5 min-h-0 bg-white rounded-lg border border-gray-100 shadow-sm flex flex-col overflow-hidden">
+        <div class="p-4 border-b border-gray-100 shrink-0">
           <h3 class="font-semibold text-gray-800">可直接发给客户的结果</h3>
         </div>
-        <div class="flex-1 overflow-hidden" v-if="quoteResult">
-          <el-tabs v-model="activeTab" class="h-full flex flex-col">
-            <el-tab-pane label="报价单" name="quotation" class="flex-1 overflow-y-auto p-4">
+        <div class="flex-1 min-h-0 overflow-hidden flex flex-col" v-if="quoteResult">
+          <el-tabs v-model="activeTab" class="quote-result-tabs h-full min-h-0 flex flex-col">
+            <el-tab-pane label="报价单" name="quotation" class="p-4">
               <QuotationPreview :quote="quoteResult" @update:items="onItemsUpdate" />
               <div class="mt-4 border-t border-gray-100 pt-4 space-y-2">
                 <div class="flex items-center justify-between">
@@ -435,7 +435,7 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
                 />
               </div>
             </el-tab-pane>
-            <el-tab-pane label="回复话术" name="reply" class="flex-1 overflow-y-auto p-4">
+            <el-tab-pane label="回复话术" name="reply" class="p-4">
               <ReplyVersions :versions="quoteResult.replyVersions" :parsed-params="parsedParams" @update:versions="quoteResult.replyVersions = $event" />
               <div class="mt-4 border-t border-gray-100 pt-4 space-y-2">
                 <div class="flex items-center justify-between">
@@ -469,7 +469,7 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
                 />
               </div>
             </el-tab-pane>
-            <el-tab-pane label="参数确认清单" name="checklist" class="flex-1 overflow-y-auto p-4">
+            <el-tab-pane label="参数确认清单" name="checklist" class="p-4">
               <ConfirmationChecklist :items="quoteResult.confirmationList" />
               <div class="mt-4 border-t border-gray-100 pt-4 space-y-2">
                 <div class="flex items-center justify-between">
@@ -493,13 +493,14 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
                 />
               </div>
             </el-tab-pane>
-            <el-tab-pane label="附件包" name="attachments" class="flex-1 overflow-y-auto p-4">
+            <el-tab-pane label="附件包" name="attachments" class="p-4">
               <AttachmentPack
                 :attachments="quoteResult.attachments"
                 :loading="attachmentPackLoading"
+                :generating-indices="Array.from(aiGeneratingAttachmentIndices)"
                 @generate-pack="handleGenerateEmailAttachmentPack"
                 @download-all="handleDownloadAttachmentPack"
-                @ai-generate="handleAiGenerateSingleAttachment"
+                @ai-generate="(att, idx) => handleAiGenerateSingleAttachment(att, idx)"
               />
             </el-tab-pane>
           </el-tabs>
@@ -516,7 +517,7 @@ Need 500 pcs stainless steel table legs, 70cm height, black coating, packing by 
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useQuoteStore } from '@/stores/quote'
 import { useProductStore } from '@/stores/product'
@@ -840,6 +841,60 @@ watch(
   },
   { deep: true }
 )
+
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function buildDraftPayload(): Record<string, unknown> {
+  return {
+    id: draftQuoteId.value ?? undefined,
+    customerName: parsedParams.value?.customerName || '',
+    country: parsedParams.value?.country || '',
+    currency: parsedParams.value?.currency || 'USD',
+    deliveryAddress: parsedParams.value?.deliveryAddress || '',
+    status: '草稿',
+    totalAmount: quoteResult.value?.totalAmount || 0,
+    rawRequirement: requirementText.value,
+    parsedParams: parsedParams.value,
+    replyVersions: quoteResult.value?.replyVersions || [],
+    confirmationList: quoteResult.value?.confirmationList || [],
+    attachmentList: quoteResult.value?.attachments || [],
+    items: quoteResult.value?.items || [],
+    templateMeta: {
+      language: templateLang.value,
+      selectedTemplateIdByCat: selectedTemplateIdByCat.value,
+    },
+    renderedContents: renderedTextByCat.value,
+  }
+}
+
+async function runAutoSaveDraft() {
+  if (suppressDirty.value) return
+  if (!isDirty.value) return
+  if (!parsedParams.value && !quoteResult.value) return
+  try {
+    const saved = (await quoteStore.saveQuote(buildDraftPayload())) as { id?: number }
+    if (saved?.id) {
+      draftQuoteId.value = saved.id
+      isDirty.value = false
+    }
+  } catch {
+    // 静默失败，避免打断输入
+  }
+}
+
+watch(isDirty, (dirty) => {
+  if (!dirty) return
+  if (!parsedParams.value && !quoteResult.value) return
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  autoSaveTimer = setTimeout(() => {
+    autoSaveTimer = null
+    void runAutoSaveDraft()
+  }, 25000)
+})
+
+onUnmounted(() => {
+  if (autoSaveTimer) clearTimeout(autoSaveTimer)
+})
 
 function emptyParsedParams(): ParsedParams {
   return {
@@ -1239,13 +1294,16 @@ async function runAiGenerateExamples() {
     const prompt = aiGenExtraHint.value.trim()
       ? `${g.promptHint}\n\n补充说明：${aiGenExtraHint.value.trim()}`
       : g.promptHint
-    const res: any = await request.post('/ai/generate-inquiry-examples', {
+    const created: any = await request.post('/ai/inquiry-example-jobs', {
       groupName: g.name,
       groupPrompt: prompt,
       language: aiGenLang.value,
       count: aiGenCount.value,
     })
-    const rows = (res.data?.examples || []) as Array<{ title: string; lang: 'zh' | 'en'; content: string }>
+    const jobId = Number(created.data?.jobId)
+    if (!jobId) throw new Error('创建示例生成任务失败')
+    const jobData: any = await pollJobGeneric(`/ai/inquiry-example-jobs/${jobId}`)
+    const rows = (jobData?.examples || []) as Array<{ title: string; lang: 'zh' | 'en'; content: string }>
     if (!Array.isArray(rows) || rows.length === 0) {
       ElMessage.error('AI 未生成有效示例')
       return
@@ -1317,7 +1375,8 @@ function onItemsUpdate(items: Quote['items']) {
 
 let generatePollTimer: any = null
 const attachmentPackLoading = ref(false)
-const aiGeneratingAttachmentNames = ref<Set<string>>(new Set())
+/** 按附件在列表中的下标隔离「生成中」，避免同名文件或并行轮询互相干扰 */
+const aiGeneratingAttachmentIndices = ref<Set<number>>(new Set())
 
 function stopGeneratePolling() {
   if (generatePollTimer) {
@@ -1326,6 +1385,11 @@ function stopGeneratePolling() {
   }
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms))
+}
+
+/** 通用任务轮询：等待间隔使用独立 sleep，勿与全局 generatePollTimer 共用，以支持多任务并行 */
 async function pollJobGeneric(url: string) {
   const start = Date.now()
   let interval = 1000
@@ -1342,10 +1406,7 @@ async function pollJobGeneric(url: string) {
     if (elapsed > 30000 && interval < 3000) interval = 3000
     if (elapsed > 60000 && interval < 5000) interval = 5000
     // eslint-disable-next-line no-await-in-loop
-    await new Promise((r) => {
-      stopGeneratePolling()
-      generatePollTimer = setTimeout(r, interval)
-    })
+    await sleep(interval)
   }
 }
 
@@ -1379,7 +1440,10 @@ async function pollGenerateJob(jobId: number) {
   }
 }
 
-async function handleAiGenerateSingleAttachment(att: { name: string; url?: string; selected: boolean; source?: string }) {
+async function handleAiGenerateSingleAttachment(
+  att: { name: string; url?: string; selected: boolean; source?: string },
+  rowIndex: number
+) {
   if (!parsedParams.value || !quoteResult.value) {
     ElMessage.warning('请先生成报价后再生成附件')
     return
@@ -1392,9 +1456,9 @@ async function handleAiGenerateSingleAttachment(att: { name: string; url?: strin
   }
   if (String(att.url || '').trim()) return
   if (String(att.source || '') !== 'ai') return
-  if (aiGeneratingAttachmentNames.value.has(name)) return
+  if (aiGeneratingAttachmentIndices.value.has(rowIndex)) return
 
-  aiGeneratingAttachmentNames.value = new Set(aiGeneratingAttachmentNames.value).add(name)
+  aiGeneratingAttachmentIndices.value = new Set(aiGeneratingAttachmentIndices.value).add(rowIndex)
   try {
     const created: any = await request.post('/quotes/attachment-generate-jobs', {
       params: parsedParams.value,
@@ -1407,19 +1471,24 @@ async function handleAiGenerateSingleAttachment(att: { name: string; url?: strin
     const a = jobData?.attachment
     const url = String(a?.url || '').trim()
     if (url && quoteResult.value) {
-      quoteResult.value.attachments = (quoteResult.value.attachments || []).map((x: any) => {
-        if (String(x?.name || '').trim() !== name) return x
-        return { ...x, url, source: 'ai_generated' }
-      })
+      const list = quoteResult.value.attachments || []
+      if (rowIndex >= 0 && rowIndex < list.length && String(list[rowIndex]?.name || '').trim() === name) {
+        list[rowIndex] = { ...list[rowIndex], url, source: 'ai_generated' }
+      } else {
+        quoteResult.value.attachments = list.map((x: any) => {
+          if (String(x?.name || '').trim() !== name) return x
+          return { ...x, url, source: 'ai_generated' }
+        })
+      }
     }
     ElMessage.success('附件生成完成')
   } catch (e) {
     console.error(e)
     ElMessage.error('附件生成失败，请稍后重试')
   } finally {
-    const next = new Set(aiGeneratingAttachmentNames.value)
-    next.delete(name)
-    aiGeneratingAttachmentNames.value = next
+    const next = new Set(aiGeneratingAttachmentIndices.value)
+    next.delete(rowIndex)
+    aiGeneratingAttachmentIndices.value = next
   }
 }
 
@@ -1556,27 +1625,7 @@ async function handleSaveDraft() {
     return
   }
   try {
-    const data: Record<string, unknown> = {
-      id: draftQuoteId.value ?? undefined,
-      customerName: parsedParams.value?.customerName || '',
-      country: parsedParams.value?.country || '',
-      currency: parsedParams.value?.currency || 'USD',
-      deliveryAddress: parsedParams.value?.deliveryAddress || '',
-      status: '草稿',
-      totalAmount: quoteResult.value?.totalAmount || 0,
-      rawRequirement: requirementText.value,
-      parsedParams: parsedParams.value,
-      replyVersions: quoteResult.value?.replyVersions || [],
-      confirmationList: quoteResult.value?.confirmationList || [],
-      attachmentList: quoteResult.value?.attachments || [],
-      items: quoteResult.value?.items || [],
-      templateMeta: {
-        language: templateLang.value,
-        selectedTemplateIdByCat: selectedTemplateIdByCat.value,
-      },
-      renderedContents: renderedTextByCat.value,
-    }
-    const saved = (await quoteStore.saveQuote(data)) as { id?: number }
+    const saved = (await quoteStore.saveQuote(buildDraftPayload())) as { id?: number }
     if (saved?.id) {
       draftQuoteId.value = saved.id
       isDirty.value = false
@@ -1589,3 +1638,15 @@ async function handleSaveDraft() {
   }
 }
 </script>
+
+<style scoped>
+/* 右侧结果区：flex 子项默认 min-height:auto 会撑破布局，需 min-h-0 + 可滚动内容区，否则长话术/报价被裁切 */
+.quote-result-tabs :deep(.el-tabs__header) {
+  flex-shrink: 0;
+}
+.quote-result-tabs :deep(.el-tabs__content) {
+  flex: 1 1 0%;
+  min-height: 0;
+  overflow: auto;
+}
+</style>

@@ -57,6 +57,24 @@ func mergeStringSlice(out map[string]interface{}, key string, v interface{}) {
 	out[key] = append(existing, arr...)
 }
 
+// inferReplyLangFromContent 根据正文是否含足够汉字判断展示语言，避免 AI 在 JSON 里写 language:"en" 却输出中文导致标签与正文不一致。
+func inferReplyLangFromContent(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "en"
+	}
+	var cjk int
+	for _, r := range s {
+		if r >= 0x4E00 && r <= 0x9FFF {
+			cjk++
+		}
+	}
+	if cjk >= 2 {
+		return "zh"
+	}
+	return "en"
+}
+
 func splitQuoteMeta(params map[string]interface{}) (clean map[string]interface{}, hints map[string]interface{}) {
 	clean = make(map[string]interface{})
 	hints = make(map[string]interface{})
@@ -125,7 +143,7 @@ func intVal(v interface{}) int {
 	return 0
 }
 
-func normalizeGenerateResponse(raw map[string]interface{}, fallbackCustomer, fallbackCurrency, replyLang string) map[string]interface{} {
+func normalizeGenerateResponse(raw map[string]interface{}, fallbackCustomer, fallbackCurrency string) map[string]interface{} {
 	out := make(map[string]interface{})
 	itemsIn := toIfaceSlice(raw["items"])
 	if len(itemsIn) == 0 {
@@ -167,7 +185,7 @@ func normalizeGenerateResponse(raw map[string]interface{}, fallbackCustomer, fal
 	if rv == nil {
 		rv = raw["reply_versions"]
 	}
-	out["replyVersions"] = normalizeReplyVersions(rv, replyLang)
+	out["replyVersions"] = normalizeReplyVersions(rv)
 
 	out["confirmationList"] = normalizeConfirmationList(raw["confirmationList"])
 	if out["confirmationList"] == nil {
@@ -204,16 +222,15 @@ func normalizeGenerateResponse(raw map[string]interface{}, fallbackCustomer, fal
 	return out
 }
 
-func normalizeReplyVersions(rv interface{}, replyLang string) []map[string]interface{} {
+func normalizeReplyVersions(rv interface{}) []map[string]interface{} {
 	if m, ok := rv.(map[string]interface{}); ok {
-		lang := "en"
-		if replyLang == "zh" {
-			lang = "zh"
-		}
+		short := strVal(m, "short")
+		prof := strVal(m, "professional")
+		follow := strVal(m, "followup")
 		return []map[string]interface{}{
-			{"title": "简短成交版 (WhatsApp/微信)", "content": strVal(m, "short"), "language": lang},
-			{"title": "专业邮件版", "content": strVal(m, "professional"), "language": lang},
-			{"title": "追单版", "content": strVal(m, "followup"), "language": lang},
+			{"title": "简短成交版 (WhatsApp/微信)", "content": short, "language": inferReplyLangFromContent(short)},
+			{"title": "专业邮件版", "content": prof, "language": inferReplyLangFromContent(prof)},
+			{"title": "追单版", "content": follow, "language": inferReplyLangFromContent(follow)},
 		}
 	}
 	arr := toIfaceSlice(rv)
@@ -223,14 +240,11 @@ func normalizeReplyVersions(rv interface{}, replyLang string) []map[string]inter
 		if !ok {
 			continue
 		}
-		lang := strVal(row, "language")
-		if lang == "" {
-			lang = "en"
-		}
+		content := strVal(row, "content")
 		out = append(out, map[string]interface{}{
-			"title":   strVal(row, "title"),
-			"content": strVal(row, "content"),
-			"language": lang,
+			"title":    strVal(row, "title"),
+			"content":  content,
+			"language": inferReplyLangFromContent(content),
 		})
 	}
 	for len(out) < 3 {
@@ -289,4 +303,153 @@ func toIfaceSlice(v interface{}) []interface{} {
 		return a
 	}
 	return nil
+}
+
+// repairTextileSizeMaterial 将面料类询盘中「克重/gsm」与「门幅/幅宽/cm」正确归到 material 与 size，避免尺寸字段被克重占满。
+func repairTextileSizeMaterial(out map[string]interface{}) {
+	if out == nil {
+		return
+	}
+	raw := strings.TrimSpace(anyString(out["size"]))
+	if raw == "" {
+		return
+	}
+	mat := strings.TrimSpace(anyString(out["material"]))
+
+	// 连写无逗号：「…克重…280gsm…门幅150cm」类
+	if before, after, ok := splitBeforeFabricWidth(raw); ok && fabricHasWeight(raw) {
+		before = strings.TrimSpace(before)
+		after = strings.TrimSpace(after)
+		if before != "" && isFabricWeightSpec(before) {
+			mat = mergeMatLine(mat, before)
+			out["material"] = mat
+		}
+		if after != "" {
+			out["size"] = after
+		} else {
+			out["size"] = ""
+		}
+		return
+	}
+
+	segs := splitFabricSegments(raw)
+	if len(segs) > 1 {
+		var wts, dims []string
+		for _, s := range segs {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			w := isFabricWeightSpec(s)
+			d := isFabricDimensionSpec(s)
+			switch {
+			case w && !d:
+				wts = append(wts, s)
+			case d:
+				dims = append(dims, s)
+			default:
+				dims = append(dims, s)
+			}
+		}
+		if len(wts) > 0 {
+			out["material"] = mergeMatLine(mat, strings.Join(wts, "，"))
+		}
+		if len(dims) > 0 {
+			out["size"] = strings.Join(dims, "，")
+		} else {
+			out["size"] = ""
+		}
+		return
+	}
+
+	// 单段：仅克重/gsm、无门幅尺寸 → 归入 material，清空 size
+	if len(segs) == 1 && isFabricWeightSpec(raw) && !isFabricDimensionSpec(raw) {
+		out["material"] = mergeMatLine(mat, raw)
+		out["size"] = ""
+	}
+}
+
+func anyString(v interface{}) string {
+	if v == nil {
+		return ""
+	}
+	switch t := v.(type) {
+	case string:
+		return t
+	default:
+		return fmt.Sprint(t)
+	}
+}
+
+func mergeMatLine(existing, frag string) string {
+	existing = strings.TrimSpace(existing)
+	frag = strings.TrimSpace(frag)
+	if frag == "" {
+		return existing
+	}
+	if existing == "" {
+		return frag
+	}
+	if strings.Contains(existing, frag) {
+		return existing
+	}
+	return existing + "，" + frag
+}
+
+func splitFabricSegments(s string) []string {
+	s = strings.ReplaceAll(s, "；", ",")
+	cur := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '，' || r == ',' || r == ';'
+	})
+	var parts []string
+	for _, p := range cur {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if len(parts) == 0 {
+		return []string{s}
+	}
+	return parts
+}
+
+// splitBeforeFabricWidth 在「门幅/幅宽」前切开（用于无标点连写，如 克重约280gsm门幅150cm）。
+func splitBeforeFabricWidth(raw string) (before, after string, ok bool) {
+	for _, kw := range []string{"门幅", "幅宽"} {
+		if idx := strings.Index(raw, kw); idx > 0 {
+			return raw[:idx], raw[idx:], true
+		}
+	}
+	return "", "", false
+}
+
+func fabricHasWeight(s string) bool {
+	sl := strings.ToLower(s)
+	return strings.Contains(sl, "gsm") || strings.Contains(s, "克重") || strings.Contains(sl, "g/m²") || strings.Contains(sl, "g/m2")
+}
+
+func isFabricWeightSpec(s string) bool {
+	sl := strings.ToLower(s)
+	if strings.Contains(sl, "gsm") {
+		return true
+	}
+	if strings.Contains(s, "克重") {
+		return true
+	}
+	if strings.Contains(sl, "g/") && strings.Contains(sl, "m") && strings.Contains(sl, "²") {
+		return true
+	}
+	return false
+}
+
+func isFabricDimensionSpec(s string) bool {
+	if strings.Contains(s, "门幅") || strings.Contains(s, "幅宽") {
+		return true
+	}
+	sl := strings.ToLower(s)
+	if strings.Contains(sl, "cm") || strings.Contains(sl, "mm") || strings.Contains(sl, "inch") || strings.Contains(s, "英寸") {
+		return true
+	}
+	return false
 }

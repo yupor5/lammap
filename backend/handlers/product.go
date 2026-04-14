@@ -41,9 +41,14 @@ func ListProducts(db *gorm.DB) gin.HandlerFunc {
 
 func GetProduct(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		userID := c.GetUint("userID")
 		id := c.Param("id")
 		var product models.Product
 		if err := db.First(&product, id).Error; err != nil {
+			Error(c, http.StatusNotFound, "产品不存在")
+			return
+		}
+		if product.UserID != userID {
 			Error(c, http.StatusNotFound, "产品不存在")
 			return
 		}
@@ -70,9 +75,14 @@ func CreateProduct(db *gorm.DB) gin.HandlerFunc {
 
 func UpdateProduct(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		userID := c.GetUint("userID")
 		id := c.Param("id")
 		var product models.Product
 		if err := db.First(&product, id).Error; err != nil {
+			Error(c, http.StatusNotFound, "产品不存在")
+			return
+		}
+		if product.UserID != userID {
 			Error(c, http.StatusNotFound, "产品不存在")
 			return
 		}
@@ -80,6 +90,7 @@ func UpdateProduct(db *gorm.DB) gin.HandlerFunc {
 			Error(c, http.StatusBadRequest, "参数错误: "+err.Error())
 			return
 		}
+		product.UserID = userID
 		db.Save(&product)
 		Success(c, product)
 	}
@@ -87,8 +98,18 @@ func UpdateProduct(db *gorm.DB) gin.HandlerFunc {
 
 func DeleteProduct(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		userID := c.GetUint("userID")
 		id := c.Param("id")
-		if err := db.Delete(&models.Product{}, id).Error; err != nil {
+		var product models.Product
+		if err := db.First(&product, id).Error; err != nil {
+			Error(c, http.StatusNotFound, "产品不存在")
+			return
+		}
+		if product.UserID != userID {
+			Error(c, http.StatusNotFound, "产品不存在")
+			return
+		}
+		if err := db.Delete(&product).Error; err != nil {
 			Error(c, http.StatusInternalServerError, "删除失败")
 			return
 		}

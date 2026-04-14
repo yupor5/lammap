@@ -92,18 +92,35 @@
           </el-button>
         </div>
 
-        <!-- 忘记密码弹窗 -->
-        <el-dialog v-model="showForgotPassword" title="忘记密码" width="400px" :append-to-body="true">
-          <el-form :model="forgotForm" label-width="60px">
+        <!-- 忘记密码：需邮箱 + 重置令牌（邮件或管理员/开发环境返回）+ 新密码 -->
+        <el-dialog v-model="showForgotPassword" title="忘记密码" width="440px" :append-to-body="true">
+          <p class="text-sm text-gray-500 mb-3">
+            请先填写邮箱并点击「申请重置」获取令牌（生产环境通过邮件；本地可将环境变量 EXPOSE_PASSWORD_RESET_TOKEN=1 以便调试）。
+          </p>
+          <el-form :model="forgotForm" label-width="72px">
             <el-form-item label="邮箱">
-              <el-input v-model="forgotForm.email" placeholder="请输入注册邮箱" />
+              <el-input v-model="forgotForm.email" placeholder="注册邮箱" />
+            </el-form-item>
+            <el-form-item label=" ">
+              <el-button :loading="forgotRequestLoading" @click="handleRequestForgot">申请重置</el-button>
+            </el-form-item>
+            <el-alert
+              v-if="forgotDevToken"
+              type="warning"
+              :closable="false"
+              class="mb-3"
+              title="开发环境令牌（勿用于生产）"
+              :description="forgotDevToken"
+            />
+            <el-form-item label="令牌">
+              <el-input v-model="forgotForm.token" placeholder="粘贴重置令牌" />
             </el-form-item>
             <el-form-item label="新密码">
-              <el-input v-model="forgotForm.newPassword" type="password" placeholder="请输入新密码（至少6位）" show-password />
+              <el-input v-model="forgotForm.newPassword" type="password" placeholder="至少 6 位" show-password />
             </el-form-item>
           </el-form>
           <template #footer>
-            <el-button @click="showForgotPassword = false">取消</el-button>
+            <el-button @click="closeForgotDialog">取消</el-button>
             <el-button type="primary" :loading="forgotLoading" @click="handleResetPassword">重置密码</el-button>
           </template>
         </el-dialog>
@@ -129,6 +146,8 @@ const loading = ref(false)
 const rememberMe = ref(localStorage.getItem('rememberMe') === 'true')
 const showForgotPassword = ref(false)
 const forgotLoading = ref(false)
+const forgotRequestLoading = ref(false)
+const forgotDevToken = ref('')
 
 const form = reactive({
   name: '',
@@ -139,6 +158,7 @@ const form = reactive({
 
 const forgotForm = reactive({
   email: '',
+  token: '',
   newPassword: '',
 })
 
@@ -184,9 +204,35 @@ async function handleSubmit() {
   })
 }
 
+function closeForgotDialog() {
+  showForgotPassword.value = false
+  forgotDevToken.value = ''
+}
+
+async function handleRequestForgot() {
+  if (!forgotForm.email) {
+    ElMessage.warning('请填写邮箱')
+    return
+  }
+  forgotRequestLoading.value = true
+  forgotDevToken.value = ''
+  try {
+    const res: any = await request.post('/auth/forgot-password', { email: forgotForm.email })
+    ElMessage.success(String(res.data?.message || '若邮箱已注册，请查收邮件或使用令牌'))
+    if (res.data?.resetToken) {
+      forgotDevToken.value = String(res.data.resetToken)
+      forgotForm.token = forgotDevToken.value
+    }
+  } catch {
+    ElMessage.error('申请失败，请稍后重试')
+  } finally {
+    forgotRequestLoading.value = false
+  }
+}
+
 async function handleResetPassword() {
-  if (!forgotForm.email || !forgotForm.newPassword) {
-    ElMessage.warning('请填写邮箱和新密码')
+  if (!forgotForm.email || !forgotForm.token || !forgotForm.newPassword) {
+    ElMessage.warning('请填写邮箱、令牌和新密码')
     return
   }
   if (forgotForm.newPassword.length < 6) {
@@ -197,13 +243,14 @@ async function handleResetPassword() {
   try {
     await request.post('/auth/reset-password', {
       email: forgotForm.email,
+      token: forgotForm.token,
       newPassword: forgotForm.newPassword,
     })
     ElMessage.success('密码重置成功，请使用新密码登录')
-    showForgotPassword.value = false
+    closeForgotDialog()
     form.email = forgotForm.email
   } catch {
-    ElMessage.error('重置失败，请确认邮箱是否正确')
+    ElMessage.error('重置失败：令牌错误或已过期')
   } finally {
     forgotLoading.value = false
   }

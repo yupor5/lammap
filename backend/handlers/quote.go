@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"quotepro-backend/config"
 	"quotepro-backend/models"
@@ -37,7 +35,10 @@ func ParseRequirement(cfg *config.Config) gin.HandlerFunc {
 			Error(c, http.StatusInternalServerError, "AI 解析失败: "+err.Error())
 			return
 		}
-		Success(c, normalizeParsedParams(result))
+		out := normalizeParsedParams(result)
+		repairTextileSizeMaterial(out)
+		out["schemaVersion"] = 1
+		Success(c, out)
 	}
 }
 
@@ -50,17 +51,13 @@ func GenerateQuote(cfg *config.Config) gin.HandlerFunc {
 		}
 
 		clean, hints := splitQuoteMeta(params)
-		replyLang := ""
-		if v, ok := hints["_replyLanguage"].(string); ok {
-			replyLang = v
-		}
 
 		result, err := services.GenerateQuoteWithAI(cfg, clean, hints)
 		if err != nil {
 			Error(c, http.StatusInternalServerError, "报价生成失败: "+err.Error())
 			return
 		}
-		normalized := normalizeGenerateResponse(result, strVal(clean, "customerName"), strVal(clean, "currency"), replyLang)
+		normalized := normalizeGenerateResponse(result, strVal(clean, "customerName"), strVal(clean, "currency"))
 		if arr, ok := normalized["items"].([]map[string]interface{}); ok && len(arr) == 0 {
 			normalized["items"] = []map[string]interface{}{{
 				"productName": strVal(clean, "productName"),
@@ -119,9 +116,14 @@ func CreateQuote(db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 
+		items := input.Items
+		for i := range items {
+			items[i].ID = 0
+			items[i].QuoteID = 0
+		}
+
 		quote := models.Quote{
 			UserID:           userID,
-			QuoteNumber:      fmt.Sprintf("QT-%s-%03d", time.Now().Format("2006"), time.Now().UnixNano()%1000),
 			CustomerName:     input.CustomerName,
 			Country:          input.Country,
 			Currency:         input.Currency,
@@ -138,14 +140,30 @@ func CreateQuote(db *gorm.DB) gin.HandlerFunc {
 			AttachmentList:   string(attachJSON),
 			TemplateMeta:     string(tmplMetaJSON),
 			RenderedContents: string(renderedJSON),
-			Items:            input.Items,
+			Items:            items,
 		}
 
 		if quote.Status == "" {
 			quote.Status = "草稿"
 		}
 
-		if err := db.Create(&quote).Error; err != nil {
+		var createdErr error
+		for attempt := 0; attempt < 12; attempt++ {
+			quote.QuoteNumber = allocateNextQuoteNumber(db)
+			quote.ID = 0
+			for i := range quote.Items {
+				quote.Items[i].ID = 0
+				quote.Items[i].QuoteID = 0
+			}
+			createdErr = db.Create(&quote).Error
+			if createdErr == nil {
+				break
+			}
+			if !isUniqueConstraintError(createdErr) {
+				break
+			}
+		}
+		if createdErr != nil {
 			Error(c, http.StatusInternalServerError, "保存报价失败")
 			return
 		}
@@ -348,16 +366,34 @@ func DuplicateQuote(db *gorm.DB) gin.HandlerFunc {
 		newQuote := original
 		newQuote.ID = 0
 		newQuote.UserID = userID
-		newQuote.QuoteNumber = fmt.Sprintf("QT-%s-%03d", time.Now().Format("2006"), time.Now().UnixNano()%1000)
 		newQuote.Status = "草稿"
-		newQuote.Items = nil
+		dupItems := make([]models.QuoteItem, len(original.Items))
+		for i, item := range original.Items {
+			dupItems[i] = item
+			dupItems[i].ID = 0
+			dupItems[i].QuoteID = 0
+		}
+		newQuote.Items = dupItems
 
-		db.Create(&newQuote)
-
-		for _, item := range original.Items {
-			item.ID = 0
-			item.QuoteID = newQuote.ID
-			db.Create(&item)
+		var dupErr error
+		for attempt := 0; attempt < 12; attempt++ {
+			newQuote.QuoteNumber = allocateNextQuoteNumber(db)
+			newQuote.ID = 0
+			for i := range newQuote.Items {
+				newQuote.Items[i].ID = 0
+				newQuote.Items[i].QuoteID = 0
+			}
+			dupErr = db.Create(&newQuote).Error
+			if dupErr == nil {
+				break
+			}
+			if !isUniqueConstraintError(dupErr) {
+				break
+			}
+		}
+		if dupErr != nil {
+			Error(c, http.StatusInternalServerError, "复制失败")
+			return
 		}
 
 		db.Preload("Items").First(&newQuote, newQuote.ID)

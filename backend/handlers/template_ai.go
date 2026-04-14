@@ -119,6 +119,7 @@ func GenerateTemplateByCategory(db *gorm.DB, cfg *config.Config) gin.HandlerFunc
 			Category: category,
 			Language: lang,
 			Content:  out.Content,
+			Source:   "ai",
 		}
 		if err := db.Create(&tmpl).Error; err != nil {
 			Error(c, http.StatusInternalServerError, "创建模板失败")

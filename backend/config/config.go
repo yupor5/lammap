@@ -14,6 +14,8 @@ type Config struct {
 	OpenAIAPIKey string
 	OpenAIModel  string
 	OpenAIBase   string
+	// ExposePasswordResetToken 为 true 时，forgot-password 在 JSON 中返回 resetToken（仅用于本地/内测；生产务必 false）
+	ExposePasswordResetToken bool
 }
 
 func Load() *Config {
@@ -47,6 +49,9 @@ func Load() *Config {
 		_ = v.Unmarshal(&fc)
 	}
 
+	exposeTok := strings.EqualFold(strings.TrimSpace(os.Getenv("EXPOSE_PASSWORD_RESET_TOKEN")), "true") ||
+		strings.TrimSpace(os.Getenv("EXPOSE_PASSWORD_RESET_TOKEN")) == "1"
+
 	return &Config{
 		Port:      getEnv("PORT", firstNonEmpty(fc.Port, "8080")),
 		DBPath:    getEnv("DB_PATH", firstNonEmpty(fc.DBPath, "quotepro.db")),
@@ -56,6 +61,8 @@ func Load() *Config {
 		OpenAIAPIKey: getEnv("OPENAI_API_KEY", fc.AI.APIKey),
 		OpenAIModel:  getEnv("OPENAI_MODEL", firstNonEmpty(fc.AI.Model, "gpt-4o-mini")),
 		OpenAIBase:   getEnv("OPENAI_BASE_URL", firstNonEmpty(fc.AI.BaseURL, "https://api.openai.com/v1")),
+
+		ExposePasswordResetToken: exposeTok,
 	}
 }
 

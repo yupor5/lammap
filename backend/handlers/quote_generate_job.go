@@ -109,10 +109,6 @@ func runGenerateJob(db *gorm.DB, cfg *config.Config, jobID uint) {
 	}
 
 	clean, hints := splitQuoteMeta(params)
-	replyLang := ""
-	if v, ok := hints["_replyLanguage"].(string); ok {
-		replyLang = v
-	}
 
 	raw, err := services.GenerateQuoteWithAI(cfg, clean, hints)
 	if err != nil {
@@ -124,7 +120,7 @@ func runGenerateJob(db *gorm.DB, cfg *config.Config, jobID uint) {
 		return
 	}
 
-	normalized := normalizeGenerateResponse(raw, strVal(clean, "customerName"), strVal(clean, "currency"), replyLang)
+	normalized := normalizeGenerateResponse(raw, strVal(clean, "customerName"), strVal(clean, "currency"))
 	if arr, ok := normalized["items"].([]map[string]interface{}); ok && len(arr) == 0 {
 		normalized["items"] = []map[string]interface{}{{
 			"productName": strVal(clean, "productName"),

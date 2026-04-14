@@ -2,6 +2,10 @@ port: "8080"
 dbPath: "quotepro.db"
 jwtSecret: "quotepro-secret-key-change-in-production"
 
+# 忘记密码：生产务必保持未设置或 false。仅本地调试时可设环境变量：
+# EXPOSE_PASSWORD_RESET_TOKEN=1
+# 此时 POST /api/auth/forgot-password 会在 JSON 中返回 resetToken（切勿上线）。
+
 ai:
   # Ark（火山方舟）OpenAI-compatible 网关地址（你的需求：coding/v3）
   baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3"

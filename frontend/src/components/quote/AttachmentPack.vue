@@ -10,22 +10,23 @@
 
     <div
       v-for="(att, index) in attachments"
-      :key="index"
+      :key="`${index}-${att.name}`"
       class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg transition-colors"
       :class="String(att.url || '').trim() ? 'hover:bg-gray-50' : 'bg-gray-50 opacity-60'"
     >
       <el-checkbox v-model="att.selected" :disabled="loading" />
       <el-icon :size="20" class="text-gray-400"><Document /></el-icon>
       <span class="flex-1 text-sm text-gray-700">{{ att.name }}</span>
-      <el-tag v-if="att.source === 'upload'" size="small" type="success">上传</el-tag>
+      <el-tag v-if="isGenerating(index)" size="small" type="warning">生成中</el-tag>
+      <el-tag v-else-if="att.source === 'upload'" size="small" type="success">上传</el-tag>
       <el-tag v-else-if="att.source === 'ai_generated'" size="small" type="primary">AI已生成</el-tag>
       <el-tag v-else size="small" type="info">AI建议</el-tag>
       <el-button
         v-if="canAiGenerate(att)"
         text
         size="small"
-        :disabled="loading || !att.selected"
-        @click="emit('ai-generate', att)"
+        :disabled="loading || !att.selected || isGenerating(index)"
+        @click="emit('ai-generate', att, index)"
       >
         AI生成
       </el-button>
@@ -52,12 +53,22 @@ import { Download, Document } from '@element-plus/icons-vue'
 const props = defineProps<{
   attachments: { name: string; url?: string; selected: boolean; source?: 'upload' | 'ai' | 'ai_generated' }[]
   loading?: boolean
+  /** 正在 AI 生成中的行下标（与父组件 Set 同步，按行隔离并行任务） */
+  generatingIndices?: number[]
 }>()
+
+function isGenerating(index: number) {
+  return (props.generatingIndices || []).includes(index)
+}
 
 const emit = defineEmits<{
   (e: 'download-all'): void
   (e: 'generate-pack'): void
-  (e: 'ai-generate', att: { name: string; url?: string; selected: boolean; source?: string }): void
+  (
+    e: 'ai-generate',
+    att: { name: string; url?: string; selected: boolean; source?: string },
+    index: number
+  ): void
 }>()
 
 function canAiGenerate(att: { url?: string; source?: string }) {

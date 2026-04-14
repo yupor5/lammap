@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,6 +133,11 @@ JSON 结构：
   "unconfirmed": ["未能从询盘识别的参数中文名列表"]
 }
 
+【纺织品/面料类 — 易错点，务必遵守】
+- material：材质与布面规格。含「克重」「gsm」「g/m²」等面布克重信息时，必须写入本字段（例如「约280gsm」或「棉/涤，280gsm」），不要写进 size。
+- size：物理尺寸/外形尺寸。含「门幅」「幅宽」「宽度」以及「150cm」「1.5m」等长度/宽度表述时写入本字段（例如「门幅150cm」）。不要把「280gsm」「克重」仅填在 size 里。
+- 若一句同时出现克重与门幅：克重相关归 material；门幅/幅宽/cm 归 size。可拆成两段文字分别填入两字段。
+
 若 AI 曾使用 snake_case 或 missing_fields，也会在服务端归一化；你仍应优先使用上述 camelCase 与 unconfirmed。`
 
 	messages := []ChatMessage{
@@ -149,6 +155,9 @@ JSON 结构：
 	if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 		return nil, fmt.Errorf("AI 返回格式错误: %v", err)
 	}
+	if err := ValidateParsedRequirementShape(parsed); err != nil {
+		return nil, err
+	}
 
 	return parsed, nil
 }
@@ -160,9 +169,13 @@ func GenerateQuoteWithAI(cfg *config.Config, params map[string]interface{}, hint
 
 严格规则：
 1. 只输出一个 JSON 对象，不要 markdown、不要解释。
-2. 不得承诺询盘与参数中未出现的具体规格、价格、交期；单价/总价可为基于行业常识的参考草稿，须在话术中使用委婉表述（如 "subject to final confirmation" / 「仅供参考，以合同为准」），不得写成绝对承诺。
+2. 不得承诺或编造用户 JSON 中**未出现**的规格、价格、交期；若用户 JSON 里**已有**某规格/数量/价格草稿，则三条 replyVersions（含简短版）都必须**写出该具体值**，句末可再加委婉限制（如 subject to final confirmation），**禁止**用一句笼统的「均以最终确认为准」完全顶替用户已填信息而不出现任何数字或要点。单价/总价可为行业常识参考草稿，同样须带委婉表述，不得写成绝对承诺。
 3. 至少包含 1 条报价行 items；replyVersions 必须 3 条，顺序为：简短成交版、专业邮件版、追单版。
 4. 确认清单 confirmationList 为数组；attachments 可为占位文件名列表，selected 布尔值。
+5. 【必须落地用户已填参数】用户 JSON 里**非空**的字段必须在 replyVersions 正文中自然出现：称呼用 customerName；交付地/目的港用 deliveryAddress；国家用 country；产品用 productName、model、material、size、color、quantity、packaging、moq、paymentTerms、leadTime 等对应键的实际值。不要把已填信息再写成「待确认」清单里的重复项；未提供的字段不要编造。
+6. 【禁止卖方占位符】三条 replyVersions 的 content 中禁止使用 [Your Full Name]、[Your Company Name]、[Contact Info]、[Your Position] 等方括号占位。若无卖方具体信息，结尾用「Best regards,」加一行「Sales Team」或仅「Best regards,」即可。
+7. confirmationList 优先列出用户 JSON 中仍为空、或出现在 unconfirmed 里、或解析未覆盖的要点；避免把 customerName、deliveryAddress、productName 等已填字段再当成「待客户补充」重复提问。
+8. 【简短成交版不得整段套话】replyVersions[0]（简短成交版）可短句、口语、可用 emoji，但必须点到用户已填的**至少若干项具体信息**（如 material、size 内 gsm/门幅、color、quantity、deliveryAddress/目的港、moq 等），**禁止**全段只有「Price, MOQ, T-count, payment etc. all subject to confirmation」类空话而完全不出现已填字段的具体值。
 
 JSON 结构：
 {
@@ -218,6 +231,9 @@ JSON 结构：
 	var generated map[string]interface{}
 	if err := json.Unmarshal([]byte(payload), &generated); err != nil {
 		return nil, fmt.Errorf("AI 返回格式错误: %v", err)
+	}
+	if err := ValidateGenerateQuoteShape(generated); err != nil {
+		return nil, err
 	}
 
 	return generated, nil
@@ -283,4 +299,126 @@ func GenerateInquiryExamplesWithAI(cfg *config.Config, groupName, groupPrompt, l
 		return nil, fmt.Errorf("AI 未返回 examples")
 	}
 	return wrapper.Examples, nil
+}
+
+// GenerateProductExamplesWithAI 生成可直接导入产品库的示例产品列表。
+// count 最大 5；extraHint 为可选补充说明（例如品类、材质、规格字段偏好等）。
+func GenerateProductExamplesWithAI(cfg *config.Config, count int, extraHint string) ([]map[string]interface{}, error) {
+	if count < 1 {
+		count = 3
+	}
+	if count > 5 {
+		count = 5
+	}
+	extraHint = strings.TrimSpace(extraHint)
+
+	system := `你是外贸 B2B 产品资料库助手。请生成若干条“产品资料库”示例数据，供卖家导入自己的产品库。
+
+严格规则：
+1) 只输出一个 JSON 对象，不要 markdown、不要解释、不要代码块。
+2) JSON 结构固定为：{"items":[{...},{...}]}
+3) items 数组长度必须等于用户指定条数。
+4) 字段必须使用 camelCase：name, sku, category, description, material, size, color, process, packaging, price, moq, leadTime, paymentTerms
+5) 内容要像真实可售产品资料：name 不要太泛；sku 可为空或短编码；category 用简短类目词；price/moq 用合理参考值（可为 0 表示未知）；leadTime/paymentTerms 可为常见表达或空。
+6) 不要输出 attachments/userId/id/createdAt/updatedAt 等系统字段。`
+
+	user := "请生成产品示例。\n"
+	user += fmt.Sprintf("条数：%d\n", count)
+	if extraHint != "" {
+		user += "补充说明：" + extraHint + "\n"
+	}
+	user += "注意：字段允许为空字符串，但必须给齐上述字段键名。"
+
+	messages := []ChatMessage{
+		{Role: "system", Content: system},
+		{Role: "user", Content: user},
+	}
+
+	result, err := callOpenAI(cfg, messages)
+	if err != nil {
+		return nil, err
+	}
+
+	payload := extractJSONPayload(result)
+	var wrapper struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(payload), &wrapper); err != nil {
+		return nil, fmt.Errorf("AI 返回格式错误: %v", err)
+	}
+	if len(wrapper.Items) != count {
+		if len(wrapper.Items) == 0 {
+			return nil, fmt.Errorf("AI 未返回 items")
+		}
+		// 容错：如果返回条数不一致，截断到前 count 条
+		if len(wrapper.Items) > count {
+			wrapper.Items = wrapper.Items[:count]
+		}
+	}
+
+	// 归一化字段（确保前端/导入端拿到的结构稳定）
+	out := make([]map[string]interface{}, 0, len(wrapper.Items))
+	for _, it := range wrapper.Items {
+		row := map[string]interface{}{
+			"name":         strings.TrimSpace(fmt.Sprint(it["name"])),
+			"sku":          strings.TrimSpace(fmt.Sprint(it["sku"])),
+			"category":     strings.TrimSpace(fmt.Sprint(it["category"])),
+			"description":  strings.TrimSpace(fmt.Sprint(it["description"])),
+			"material":     strings.TrimSpace(fmt.Sprint(it["material"])),
+			"size":         strings.TrimSpace(fmt.Sprint(it["size"])),
+			"color":        strings.TrimSpace(fmt.Sprint(it["color"])),
+			"process":      strings.TrimSpace(fmt.Sprint(it["process"])),
+			"packaging":    strings.TrimSpace(fmt.Sprint(it["packaging"])),
+			"price":        floatValLoose(it["price"]),
+			"moq":          intValLoose(it["moq"]),
+			"leadTime":     strings.TrimSpace(fmt.Sprint(it["leadTime"])),
+			"paymentTerms": strings.TrimSpace(fmt.Sprint(it["paymentTerms"])),
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+func floatValLoose(v interface{}) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case float32:
+		return float64(t)
+	case int:
+		return float64(t)
+	case int64:
+		return float64(t)
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(t), 64)
+		if err == nil {
+			return f
+		}
+	}
+	return 0
+}
+
+func intValLoose(v interface{}) int {
+	switch t := v.(type) {
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case float64:
+		return int(t)
+	case float32:
+		return int(t)
+	case json.Number:
+		i, _ := t.Int64()
+		return int(i)
+	case string:
+		n, err := strconv.Atoi(strings.TrimSpace(t))
+		if err == nil {
+			return n
+		}
+	}
+	return 0
 }

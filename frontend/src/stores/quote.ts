@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import request from '@/utils/request'
 
 export interface ParsedParams {
+  /** 后端解析结果结构版本（可选，未知字段前端忽略） */
+  schemaVersion?: number
   customerName: string
   country: string
   currency: string
@@ -49,6 +51,18 @@ export interface Quote {
   updatedAt?: string
 }
 
+/** 与后端 quote_normalize.inferReplyLangFromContent 一致：标签语言跟正文走，避免 AI 写 language:"en" 却输出中文 */
+export function inferReplyLangFromContent(s: string): 'zh' | 'en' {
+  const t = s.trim()
+  if (!t) return 'en'
+  let cjk = 0
+  for (const ch of t) {
+    const cp = ch.codePointAt(0)!
+    if (cp >= 0x4e00 && cp <= 0x9fff) cjk++
+  }
+  return cjk >= 2 ? 'zh' : 'en'
+}
+
 export function mapGeneratePayload(data: Record<string, unknown>, parsed: ParsedParams): Quote {
   const rows = (data.items as Record<string, unknown>[] | undefined) || []
   const items: QuoteItem[] = rows.map((row) => {
@@ -69,15 +83,22 @@ export function mapGeneratePayload(data: Record<string, unknown>, parsed: Parsed
   let replyVersions = data.replyVersions as Quote['replyVersions']
   const rv = data.replyVersions as Record<string, string> | Quote['replyVersions']
   if (rv && !Array.isArray(rv) && typeof rv === 'object') {
+    const short = String(rv.short ?? '')
+    const prof = String(rv.professional ?? '')
+    const follow = String(rv.followup ?? '')
     replyVersions = [
-      { title: '简短成交版 (WhatsApp/微信)', content: String(rv.short ?? ''), language: 'en' },
-      { title: '专业邮件版', content: String(rv.professional ?? ''), language: 'en' },
-      { title: '追单版', content: String(rv.followup ?? ''), language: 'en' },
+      { title: '简短成交版 (WhatsApp/微信)', content: short, language: inferReplyLangFromContent(short) },
+      { title: '专业邮件版', content: prof, language: inferReplyLangFromContent(prof) },
+      { title: '追单版', content: follow, language: inferReplyLangFromContent(follow) },
     ]
   }
   if (!replyVersions || !Array.isArray(replyVersions)) {
     replyVersions = []
   }
+  replyVersions = replyVersions.map((r) => ({
+    ...r,
+    language: inferReplyLangFromContent(String(r.content ?? '')),
+  }))
   const confirmationList = (data.confirmationList as Quote['confirmationList']) || []
   const attachments = (data.attachments as Quote['attachments']) || []
   const totalAmount = Number(data.totalAmount) || items.reduce((s, i) => s + (i.totalPrice || 0), 0)

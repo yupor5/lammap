@@ -25,8 +25,11 @@ func AutoMigrate(db *gorm.DB) {
 		&AttachmentPackJob{},
 		&AttachmentGenerateJob{},
 		&AttachmentZipJob{},
+		&InquiryExampleJob{},
+		&ProductExampleJob{},
 		&Template{},
 		&Attachment{},
+		&PasswordResetToken{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to migrate: %v", err)

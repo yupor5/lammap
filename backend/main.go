@@ -15,6 +15,7 @@ func main() {
 
 	db := models.InitDB(cfg.DBPath)
 	models.AutoMigrate(db)
+	models.RecoverStuckAsyncJobs(db)
 
 	r := gin.Default()
 	r.Use(middleware.CORS())
@@ -29,7 +30,7 @@ func main() {
 			auth.POST("/login", handlers.Login(db, cfg.JWTSecret))
 			auth.GET("/profile", middleware.Auth(cfg.JWTSecret), handlers.Profile(db))
 			auth.PUT("/password", middleware.Auth(cfg.JWTSecret), handlers.ChangePassword(db))
-			auth.POST("/forgot-password", handlers.ForgotPassword(db))
+			auth.POST("/forgot-password", handlers.ForgotPassword(db, cfg))
 			auth.POST("/reset-password", handlers.ResetPassword(db))
 		}
 
@@ -44,6 +45,8 @@ func main() {
 				products.PUT("/:id", handlers.UpdateProduct(db))
 				products.DELETE("/:id", handlers.DeleteProduct(db))
 				products.POST("/import", handlers.ImportProducts(db))
+				products.POST("/ai-example-jobs", handlers.CreateProductExampleJob(db, cfg))
+				products.GET("/ai-example-jobs/:id", handlers.GetProductExampleJob(db))
 			}
 
 			quotes := protected.Group("/quotes")
@@ -89,7 +92,10 @@ func main() {
 
 			protected.POST("/products/match", handlers.MatchProducts(db))
 			protected.POST("/ai/compose-inquiry", handlers.ComposeInquiry(cfg))
+			protected.POST("/ai/compose-product-example-hint", handlers.ComposeProductExampleHint(cfg))
 			protected.POST("/ai/generate-inquiry-examples", handlers.GenerateInquiryExamples(cfg))
+			protected.POST("/ai/inquiry-example-jobs", handlers.CreateInquiryExampleJob(db, cfg))
+			protected.GET("/ai/inquiry-example-jobs/:id", handlers.GetInquiryExampleJob(db))
 
 			protected.POST("/upload", handlers.Upload())
 		}
