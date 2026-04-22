@@ -621,6 +621,16 @@ async function loadTemplatesForCurrentLang() {
   await templateStore.fetchTemplates(undefined, templateLang.value)
 }
 
+// 模板列表属于跨页面共享 store；如果用户尚未进入「模板管理」页面，这里需要主动拉取一次，
+// 否则右侧“选择模板”下拉会是空的，直到用户去模板页点保存/刷新才出现。
+watch(
+  templateLang,
+  async () => {
+    await loadTemplatesForCurrentLang()
+  },
+  { immediate: true }
+)
+
 function ctxForTemplate() {
   const p = parsedParams.value
   const q = quoteResult.value
