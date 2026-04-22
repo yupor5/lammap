@@ -4,6 +4,11 @@ import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 
 export default defineConfig({
+  // 将构建产物输出到 Go 的 embed 目录，便于与后端打成单一 exe
+  build: {
+    outDir: resolve(__dirname, '../backend/web/dist'),
+    emptyOutDir: true,
+  },
   plugins: [vue(), tailwindcss()],
   resolve: {
     alias: {

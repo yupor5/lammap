@@ -1,0 +1,11 @@
+# 复制为同目录下 config.yaml 后修改（或设置环境变量覆盖）
+# Copy to config.yaml and adjust (environment variables can override)
+
+port: "8080"
+dbPath: "quotepro.db"
+jwtSecret: "change-me-to-a-long-random-string"
+
+ai:
+  baseUrl: "https://api.openai.com/v1"
+  apiKey: ""
+  model: "gpt-4o-mini"

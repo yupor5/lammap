@@ -4,6 +4,14 @@
 /backend/*.exe
 /backend/uploads/
 
+# 前端 Vite 构建产物；release 由 CI 现编。仅保留 dist/index.html 占位供 go:embed
+/backend/web/dist/**
+!/backend/web/dist/index.html
+
+# 本地打 release 包输出
+/build/
+/dist/
+
 # Common
 *.log
 .DS_Store

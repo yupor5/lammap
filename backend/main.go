@@ -2,10 +2,15 @@ package main
 
 import (
 	"log"
+	"os"
+	"os/exec"
 	"quotepro-backend/config"
 	"quotepro-backend/handlers"
 	"quotepro-backend/middleware"
 	"quotepro-backend/models"
+	"quotepro-backend/web"
+	"runtime"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -101,8 +106,34 @@ func main() {
 		}
 	}
 
-	log.Printf("Server starting on :%s", cfg.Port)
+	// 嵌入的前端（Vue 构建输出到 web/dist）与 history 回退
+	web.RegisterSPAFallback(r)
+
+	if os.Getenv("SKIP_OPEN_BROWSER") != "1" {
+		url := "http://127.0.0.1:" + cfg.Port
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			openBrowser(url)
+		}()
+	}
+	log.Printf("已启动，浏览器将打开: http://127.0.0.1:%s （设置 SKIP_OPEN_BROWSER=1 可禁止自动打开）", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	if cmd == nil {
+		return
+	}
+	_ = cmd.Start()
 }
