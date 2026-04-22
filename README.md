@@ -8,28 +8,35 @@
 
 ## 界面截图
 
-以下图片来自目录 `[doc/image/](doc/image/)`，在 GitHub 等托管页面上可直接渲染。
+以下图片来自目录 `[doc/image,`在 GitHub 等托管页面上可直接渲染。
 
 ### 登录与欢迎页
 
 登录与欢迎页
 
+<img src="./doc/image/1.png" width="800" height="500">
+
 ### 工作台
 
 工作台
+<img src="./doc/image/2.png" >
 
 ### 历史报价
 
 历史报价
+<img src="./doc/image/3.png">
+
 
 ### 新建报价（需求解析与生成）
 
 新建报价（三栏：客户需求 / 已识别参数 / 可发送结果）
+<img src="./doc/image/4.png">
+
 
 ### 模板管理
 
 模板管理
-
+<img src="./doc/image/5.png">
 ---
 
 ## 项目结构
